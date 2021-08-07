@@ -70,8 +70,8 @@ async function fetchData() {
     let virtualPrice = totalBal/effectiveBal;
     
     console.log(`Total Validators: ${results.length} \n \
-                Total Eth: ${totalBal/1e8} \n \
-                Total Gains: ${(totalBal-effectiveBal)/1e8} \n \
+                Total Eth: ${totalBal/1e9} \n \
+                Total Gains: ${(totalBal-effectiveBal)/1e9} \n \
                 Virtual Price: ${virtualPrice}
                 Virtual Price for Oracle: ${virtualPrice*1e18}`);
 }
