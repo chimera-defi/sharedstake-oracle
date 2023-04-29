@@ -40,10 +40,18 @@ async function httpGet(url) {
 function getValidatorIndicesFromFile(filePath) {
     indexFile = fs.readFileSync(filePath, 'utf8')
     let indices = [];
+
     // Transform from a newline seperated text of 'pubkey: index' pairs like so: "0x89b9d095: 115157" to an array of indices
-    indexFile.split('\n').forEach(str => indices.push(str.match(/:(.*)/g).pop().replace(':','').trim()));
+    indexFile.split('\n').forEach(str => {
+        try {
+            indices.push(str.match(/:(.*)/g).pop().replace(':','').trim())
+        } // give it your best shot bud
+        catch (error) {}
+    });
+
     // remove first empty row which is a header
     indices.shift();
+
     return indices;
 }
 
@@ -52,25 +60,52 @@ async function getAllValidatorInfo(indices) {
     await Promise.all(chunkArray(indices, 100).map(async (chunk) => {
         let url = reqUrl.concat(chunk.toString());
         let res = await httpGet(url);
-        results = results.concat(JSON.parse(res).data);
+        try {
+            results = results.concat(JSON.parse(res).data);
+        } catch (e) {
+            console.log(e);
+            console.log(`Failed to parse ${res}`)
+        }
     }))
 }
 
 async function fetchData() {
     let indices = getValidatorIndicesFromFile(filePath);
-    await getAllValidatorInfo(indices);
-    console.log(`Debug: filepath: ${filePath} | index count: ${indices.length} | first index: ${indices[0]} | results: ${results.length}`)
+    await getAllValidatorInfo(indices); 
+    // console.log(`Debug: filepath: ${filePath} | index count: ${indices.length} | first index: ${indices[0]} | results: ${results.length}`)
+    // console.log(`val 1: ` + JSON.stringify(results[0]))
 
     let totalBal = 0;
     let effectiveBal = 0;
+    let totalWithdrawals = 0;
+    let nameErr = 0;
+    let validatorErr = 0;
+    let changedWithdrawalcredentials = 0;
     results.forEach(validator => {
+        if (validator.name !== "@ChimeraDefi") nameErr++;
+        if (validator.status !== "active_online" || validator.slashed !== false) {
+            validatorErr++;
+            console.log(`Validator ERR: ${JSON.stringify(validator)}`)
+        }
+        if (validator.withdrawalcredentials.split('')[3] !== '0') {
+            changedWithdrawalcredentials++;
+            console.log(`Withdrawal creds ERR: ${JSON.stringify(validator)}`)
+        }
+
+        totalWithdrawals += validator.total_withdrawals
         totalBal += validator.balance;
         effectiveBal += validator.effectivebalance;
     })
+    // ugly manual patch - manually add eth from mev - apr 30 - 180 Eth minus 20%
+    totalBal += 140 * 1e9;
     let virtualPrice = totalBal/effectiveBal;
-    
+
     console.log(`Total Validators: ${results.length} \n \
                 Total Eth: ${totalBal/1e9} \n \
+                Total withdrawals: ${totalWithdrawals} \n \
+                Creds Changed: ${changedWithdrawalcredentials} \n \
+                Total name changed Validators: ${nameErr} \n \
+                Total failed Validators: ${validatorErr} \n \
                 Total Gains: ${(totalBal-effectiveBal)/1e9} \n \
                 Virtual Price: ${virtualPrice}
                 Virtual Price for Oracle: ${virtualPrice*1e18}`);
