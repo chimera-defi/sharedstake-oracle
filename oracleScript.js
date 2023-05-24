@@ -96,9 +96,17 @@ async function fetchData() {
         totalBal += validator.balance;
         effectiveBal += validator.effectivebalance;
     })
-    // ugly manual patch - manually add eth from mev - apr 30 - 180 Eth minus 20%
-    totalBal += 140 * 1e9;
+    // ugly manual patch - manually add eth from mev 
+    //- apr 30 - 180 Eth minus 20%
+    // may 24 - 200 eth
+    totalBal += 200 * 1e9;
+    totalGains = totalBal-effectiveBal;
     let virtualPrice = totalBal/effectiveBal;
+
+    // Account for 20% take
+    let totalFees = totalGains * 0.2;
+    let totalGainsPostFees = totalGains - totalFees;
+    let virtualPricePostFees = (effectiveBal+totalGainsPostFees) / effectiveBal;
 
     console.log(`Total Validators: ${results.length} \n \
                 Total Eth: ${totalBal/1e9} \n \
@@ -107,8 +115,8 @@ async function fetchData() {
                 Total name changed Validators: ${nameErr} \n \
                 Total failed Validators: ${validatorErr} \n \
                 Total Gains: ${(totalBal-effectiveBal)/1e9} \n \
-                Virtual Price: ${virtualPrice}
-                Virtual Price for Oracle: ${virtualPrice*1e18}`);
+                Virtual Price post fees: ${virtualPricePostFees}
+                Virtual Price for Oracle: ${virtualPricePostFees*1e18}`);
 }
 
 fetchData();
