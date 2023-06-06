@@ -13,12 +13,13 @@ const fs = require('fs');
 let results = [];
 let filePath = './all_validator_indices.txt'
 let reqUrl = 'https://beaconcha.in/api/v1/validator/';
+const ELR_ADDR = '0xa1feaF41d843d53d0F6bEd86a8cF592cE21C409e';
 
 function chunkArray(array, size) {
-    if(array.length <= size){
+    if (array.length <= size) {
         return [array]
     }
-    return [array.slice(0,size), ...chunkArray(array.slice(size), size)]
+    return [array.slice(0, size), ...chunkArray(array.slice(size), size)]
 }
 
 async function httpGet(url) {
@@ -36,7 +37,6 @@ async function httpGet(url) {
         });
     });
 }
-
 function getValidatorIndicesFromFile(filePath) {
     indexFile = fs.readFileSync(filePath, 'utf8')
     let indices = [];
@@ -44,9 +44,9 @@ function getValidatorIndicesFromFile(filePath) {
     // Transform from a newline seperated text of 'pubkey: index' pairs like so: "0x89b9d095: 115157" to an array of indices
     indexFile.split('\n').forEach(str => {
         try {
-            indices.push(str.match(/:(.*)/g).pop().replace(':','').trim())
+            indices.push(str.match(/:(.*)/g).pop().replace(':', '').trim())
         } // give it your best shot bud
-        catch (error) {}
+        catch (error) { }
     });
 
     // remove first empty row which is a header
@@ -69,9 +69,59 @@ async function getAllValidatorInfo(indices) {
     }))
 }
 
+async function getELRewards() {
+    // curl -X POST https://rpc.sharedtools.org/rpc \
+    // -H "Content-Type: application/json" \
+    // --data \
+    // '
+    // {
+    //   "jsonrpc": "2.0",
+    //   "method": "eth_getBalance",
+    //   "params": ["0xa1feaF41d843d53d0F6bEd86a8cF592cE21C409e", "latest"],
+    //   "id": 1
+    // }
+    let myHeaders = ["Content-Type", "application/json"];
+    let raw = JSON.stringify({
+        "method": "eth_getBalance",
+        "params": [
+            ELR_ADDR,
+            "latest"
+        ],
+        "id": 1,
+        "jsonrpc": "2.0"
+    });
+    let requestOptions = {
+        hostname: 'rpc.sharedtools.org',
+        path: '/rpc',
+        method: 'POST',
+        port: 443,
+    };
+    return new Promise((resolve, reject) => {
+        let req = https.request(requestOptions, (res) => {
+            let body = "";
+            res.on("data", chunk => body += chunk)
+            res.on("end", () => {
+                try {
+                    resolve(parseInt(JSON.parse(body).result))
+                } catch (error) {
+                    reject(error.message);
+                };
+            });
+
+            res.on("error", function (error) {
+                console.error(error);
+            });
+        });
+
+        req.setHeader(...myHeaders);
+        req.write(raw);
+        req.end();
+    });
+}
+
 async function fetchData() {
     let indices = getValidatorIndicesFromFile(filePath);
-    await getAllValidatorInfo(indices); 
+    await getAllValidatorInfo(indices);
     // console.log(`Debug: filepath: ${filePath} | index count: ${indices.length} | first index: ${indices[0]} | results: ${results.length}`)
     // console.log(`val 1: ` + JSON.stringify(results[0]))
 
@@ -99,24 +149,61 @@ async function fetchData() {
     // ugly manual patch - manually add eth from mev 
     //- apr 30 - 180 Eth minus 20%
     // may 24 - 200 eth
-    totalBal += 200 * 1e9;
-    totalGains = totalBal-effectiveBal;
-    let virtualPrice = totalBal/effectiveBal;
+    // let ELR = 215 * 1e9; // execution layer rewards
+    let ELR = await getELRewards();
+    ELR = ELR / 1e9; // ELR is 1e18 but we use 1e9
+    let CLR = totalBal;
+    totalBal += ELR;
+    totalGains = totalBal - effectiveBal;
+    let virtualPrice = totalBal / effectiveBal;
 
     // Account for 20% take
     let totalFees = totalGains * 0.2;
     let totalGainsPostFees = totalGains - totalFees;
-    let virtualPricePostFees = (effectiveBal+totalGainsPostFees) / effectiveBal;
+    let virtualPricePostFees = (effectiveBal + totalGainsPostFees) / effectiveBal;
 
-    console.log(`Total Validators: ${results.length} \n \
-                Total Eth: ${totalBal/1e9} \n \
+    return {
+        totalValidators: results.length,
+        totalBal,
+        totalWithdrawals,
+        changedWithdrawalcredentials,
+        nameErr,
+        validatorErr,
+        ELR,
+        CLR,
+        effectiveBal,
+        virtualPrice,
+        virtualPricePostFees
+    }
+}
+
+async function printData(getternFn) {
+    let {
+        totalValidators,
+        totalBal,
+        totalWithdrawals,
+        changedWithdrawalcredentials,
+        nameErr,
+        validatorErr,
+        ELR,
+        CLR,
+        effectiveBal,
+        virtualPrice,
+        virtualPricePostFees
+    } = await getternFn();
+
+    console.log(`Total Validators: ${totalValidators} \n \
+                Total Eth: ${totalBal / 1e9} \n \
                 Total withdrawals: ${totalWithdrawals} \n \
                 Creds Changed: ${changedWithdrawalcredentials} \n \
                 Total name changed Validators: ${nameErr} \n \
                 Total failed Validators: ${validatorErr} \n \
-                Total Gains: ${(totalBal-effectiveBal)/1e9} \n \
-                Virtual Price post fees: ${virtualPricePostFees}
-                Virtual Price for Oracle: ${virtualPricePostFees*1e18}`);
+                Total Consensus layer rewards: ${CLR} \n \
+                Total Execution layer rewards: ${ELR} \n \
+                Total Gains: ${(totalBal - effectiveBal) / 1e9} \n \
+                Virtual price: ${virtualPrice} \n \
+                Virtual Price post fees: ${virtualPricePostFees} \n \
+                Virtual Price for Oracle: ${virtualPricePostFees * 1e18}`);
 }
 
-fetchData();
+printData(fetchData);
