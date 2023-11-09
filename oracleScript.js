@@ -13,7 +13,23 @@ const fs = require('fs');
 let results = [];
 let filePath = './all_validator_indices.txt'
 let reqUrl = 'https://beaconcha.in/api/v1/validator/';
+let rpc = {
+    hostname: 'rpc.sharedtools.org',
+    path: '/rpc',
+}
 const ELR_ADDR = '0xa1feaF41d843d53d0F6bEd86a8cF592cE21C409e';
+
+function getCurrentDate() {
+    // https://stackoverflow.com/questions/10211145/getting-current-date-and-time-in-javascript
+    var currentdate = new Date();
+    var datetime = "Sync date time: " + currentdate.getDate() + "/"
+                + (currentdate.getMonth()+1)  + "/" 
+                + currentdate.getFullYear() + " @ "  
+                + currentdate.getHours() + ":"  
+                + currentdate.getMinutes() + ":" 
+                + currentdate.getSeconds();
+    return datetime;
+}
 
 function chunkArray(array, size) {
     if (array.length <= size) {
@@ -37,6 +53,7 @@ async function httpGet(url) {
         });
     });
 }
+
 function getValidatorIndicesFromFile(filePath) {
     indexFile = fs.readFileSync(filePath, 'utf8')
     let indices = [];
@@ -51,6 +68,9 @@ function getValidatorIndicesFromFile(filePath) {
 
     // remove first empty row which is a header
     indices.shift();
+
+    //sort to match exit change script
+    indices = indices.sort((a,b) => a -b)
 
     return indices;
 }
@@ -91,8 +111,7 @@ async function getELRewards() {
         "jsonrpc": "2.0"
     });
     let requestOptions = {
-        hostname: 'rpc.sharedtools.org',
-        path: '/rpc',
+        ...rpc,
         method: 'POST',
         port: 443,
     };
@@ -129,17 +148,24 @@ async function fetchData() {
     let effectiveBal = 0;
     let totalWithdrawals = 0;
     let nameErr = 0;
-    let validatorErr = 0;
+    let validatorErr = 0, exited = 0;
     let changedWithdrawalcredentials = 0;
     results.forEach(validator => {
         if (validator.name !== "@ChimeraDefi") nameErr++;
         if (validator.status !== "active_online" || validator.slashed !== false) {
-            validatorErr++;
-            console.log(`Validator ERR: ${JSON.stringify(validator)}`)
+            if (validator.status == 'exited') {
+                exited++;
+                // console.log('Exited ', validator.validatorindex)
+            } else {
+                validatorErr++;
+                console.log(`Validator ERR: ${JSON.stringify(validator)}`)
+            }
         }
-        if (validator.withdrawalcredentials.split('')[3] !== '0') {
+        vwc = validator.withdrawalcredentials.split('')
+        if (vwc[3] !== '0') {
             changedWithdrawalcredentials++;
-            console.log(`Withdrawal creds ERR: ${JSON.stringify(validator)}`)
+            // if (validator.status !== 'exited') console.log(`cred changed:  ${JSON.stringify(validator.validatorindex)}`)
+            // console.log(`Withdrawal creds Changed: ${JSON.stringify(validator.validatorindex)} to ${vwc.join('')}`)
         }
 
         totalWithdrawals += validator.total_withdrawals
@@ -173,7 +199,8 @@ async function fetchData() {
         CLR,
         effectiveBal,
         virtualPrice,
-        virtualPricePostFees
+        virtualPricePostFees,
+        exited
     }
 }
 
@@ -189,12 +216,16 @@ async function printData(getternFn) {
         CLR,
         effectiveBal,
         virtualPrice,
-        virtualPricePostFees
+        virtualPricePostFees,
+        exited
     } = await getternFn();
+
+    console.log(getCurrentDate());
 
     console.log(`Total Validators: ${totalValidators} \n \
                 Total Eth: ${totalBal / 1e9} \n \
                 Total withdrawals: ${totalWithdrawals} \n \
+                Total Exited: ${exited} \n \
                 Creds Changed: ${changedWithdrawalcredentials} \n \
                 Total name changed Validators: ${nameErr} \n \
                 Total failed Validators: ${validatorErr} \n \
